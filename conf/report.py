@@ -1,9 +1,8 @@
 import asyncio
 
 from pyrogram import filters
-from pyrogram.enums import ChatMemberStatus, ChatType
-from pyrogram.errors import UserNotParticipant
-from pyrogram.types import Chat, User
+from pyrogram.enums import ChatType
+from pyrogram.types import User
 from ub_core.utils.helpers import get_name
 
 from app import BOT, Config, CustomDB, extra_config, Message, bot
@@ -23,6 +22,8 @@ FBAN_REGEX = filters.regex(
     r"FedBan reason updated|"
     r"Would you like to update this reason)"
 )
+
+@bot.add_cmd(cmd="test")
 
 @bot.on_message(OWNER_FILTER & filters.command("report", prefixes="/"))
 async def report_user(bot: BOT, message: Message):
@@ -45,7 +46,7 @@ async def report_user(bot: BOT, message: Message):
     if message.replied:
         try:
             proof = await message.replied.forward(extra_config.FBAN_LOG_CHANNEL)
-            proof_str = f"\n { {proof.link} }"
+            proof_str = f"\n{ {proof.link} }"
         except Exception:
             pass
 
@@ -124,16 +125,20 @@ async def perform_fed_task(
         return  # No federations connected
 
     # Prepare log for the FBAN log channel
+    initiating_chat = (
+        message.chat.title
+        if message.chat.type in {ChatType.SUPERGROUP, ChatType.GROUP}
+        else f"Chat ID: {message.chat.id}"
+    )
     log_str = (
         f"❯❯❯ <b>{task_type}ned</b> {user_mention}"
         f"\n<b>ID</b>: {user_id}"
         f"\n<b>Reason</b>: {reason}"
         f"\n<b>Status</b>: {task_type}ned in <b>{total - len(failed)}</b> feds."
+        f"\n<b>Initiated in</b>: {initiating_chat}"
     )
     if failed:
         log_str += f"\n<b>Failed</b>: {len(failed)}/{total}\n• " + "\n• ".join(failed)
-    if not message.is_from_owner:
-        log_str += f"\n\n<b>By</b>: {get_name(message.from_user)}"
 
     await bot.send_message(
         chat_id=extra_config.FBAN_LOG_CHANNEL,
