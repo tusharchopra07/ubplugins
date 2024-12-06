@@ -1,15 +1,15 @@
 from app import BOT, bot, Message
 import aiohttp
-import bs4
+from bs4 import BeautifulSoup
 
 @bot.add_cmd(cmd="app")
 async def app_function(bot: BOT, message: Message):
     try:
-        await message.reply("`Searching...`")
+        await message.reply("Searching...")
         app_name = "+".join(message.text.split()[1:])
-        async with aiohttp.ClientSession() as ses, ses.get(
-                f"https://play.google.com/store/search?q={app_name}&c=apps") as res:
-            result = bs4.BeautifulSoup(await res.text(), "lxml")
+        async with aiohttp.ClientSession() as ses:
+            async with ses.get(f"https://play.google.com/store/search?q={app_name}&c=apps") as res:
+                result = BeautifulSoup(await res.text(), "html.parser")
 
         found = result.find("div", class_="vWM94c")
         if found:
