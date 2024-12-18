@@ -1,9 +1,8 @@
 import asyncio
-from typing import Optional, Set
+from typing import Optional
 
 from pyrogram import filters
-from pyrogram.enums import ChatMemberStatus, ChatType
-from pyrogram.types import Chat, User, Message as PyroMessage, MessageOriginUser, MessageOriginChannel
+from pyrogram.types import Message as PyroMessage, User
 from ub_core.utils.helpers import get_name
 
 from app import BOT, Config, CustomDB, Message, bot, extra_config
@@ -11,9 +10,7 @@ from app import BOT, Config, CustomDB, Message, bot, extra_config
 FED_DB = CustomDB("FED_LIST")
 FBAN_APPROVERS = CustomDB("FBAN_APPROVERS")
 
-BASIC_FILTER = filters.user([609517172, 2059887769]) & ~filters.service
-
-FBAN_REGEX = BASIC_FILTER & filters.regex(
+FBAN_REGEX = filters.regex(
     r"(New FedBan|"
     r"starting a federation ban|"
     r"Starting a federation ban|"
@@ -23,7 +20,6 @@ FBAN_REGEX = BASIC_FILTER & filters.regex(
     r"Would you like to update this reason)"
 )
 
-# Specify the group ID where forwarded messages will be sent for automatic banning
 FBAN_GROUP_ID = -1002299458034  # Replace with your actual group ID
 
 async def wait_for_response(bot: BOT, chat_id: int, user_id: int, timeout: int = 30) -> Optional[str]:
@@ -43,22 +39,17 @@ async def is_fban_approver(user_id: int) -> bool:
 
 @bot.on_message(filters.chat(FBAN_GROUP_ID) & filters.forwarded)
 async def auto_fban(bot: BOT, message: Message):
-    if not message.from_user:
+    if not message.from_user or not message.forward_from:
         return
 
-    if isinstance(message.forward_origin, MessageOriginChannel):
-        return  # Ignore messages forwarded from channels
-
-    if isinstance(message.forward_origin, MessageOriginUser):
-        user_id = message.forward_origin.sender_user.id
-        user_mention = message.forward_origin.sender_user.mention
-    else:
-        await message.reply("Unable to determine the user to ban.")
-        return
-
+    user_id = message.forward_from.id
+    user_mention = message.forward_from.mention
     reason = f"Auto-FBan: Forwarded message in {message.chat.title}"
     
-    # Ask for confirmation
+    if not await is_fban_approver(message.from_user.id):
+        await message.reply("You are not authorized to approve FBans.")
+        return
+
     confirmation = await message.reply(
         f"Are you sure you want to FBan {user_mention}?\n"
         f"Reason: {reason}\n\n"
@@ -150,9 +141,7 @@ async def perform_fban(bot: BOT, message: Message, user_id: int, user_mention: s
         message=message,
     )
 
-async def get_user_reason(
-    message: Message, progress: Message
-) -> tuple[int, str, str] | None:
+async def get_user_reason(message: Message, progress: Message) -> tuple[int, str, str] | None:
     user, reason = await message.extract_user_n_reason()
     if isinstance(user, str):
         await progress.edit(user)
@@ -183,7 +172,7 @@ async def perform_fed_task(
         total += 1
         try:
             cmd: Message = await bot.send_message(
-                chat_id=chat_id, text=command, link_preview_options={"is_disabled": True}
+                chat_id=chat_id, text=command, disable_web_page_preview=True
             )
             response: Message | None = await cmd.get_response(
                 filters=task_filter, timeout=8
@@ -217,18 +206,8 @@ async def perform_fed_task(
     await bot.send_message(
         chat_id=extra_config.FBAN_LOG_CHANNEL,
         text=resp_str,
-        link_preview_options={"is_disabled": True},
+        disable_web_page_preview=True,
     )
     await progress.edit(
-        text=resp_str, del_in=5, block=True, link_preview_options={"is_disabled": True}
+        text=resp_str, del_in=5, block=True, disable_web_page_preview=True
     )
-    await handle_sudo_fban(command=command)
-
-async def handle_sudo_fban(command: str):
-    if not (extra_config.FBAN_SUDO_ID and extra_config.FBAN_SUDO_TRIGGER):
-        return
-    sudo_cmd = command.replace("/", extra_config.FBAN_SUDO_TRIGGER, 1)
-    await bot.send_message(
-        chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, link_preview_options={"is_disabled": True}
-    )
-
