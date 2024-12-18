@@ -21,8 +21,6 @@ FBAN_REGEX = BASIC_FILTER & filters.regex(
     r"Would you like to update this reason)"
 )
 
-UNFBAN_REGEX = BASIC_FILTER & filters.regex(r"(New un-FedBan|I'll give|Un-FedBan)")
-
 # Specify the group ID where forwarded messages will be sent for automatic banning
 FBAN_GROUP_ID = -1002299458034  # Replace with your actual group ID
 
@@ -152,49 +150,6 @@ async def remove_fed(bot: BOT, message: Message):
     else:
         await message.reply(text=f"<b>{name or chat}</b> not in FED LIST.", del_in=8)
 
-@bot.add_cmd(cmd="listf")
-async def fed_list(bot: BOT, message: Message):
-    """
-    CMD: LISTF
-    INFO: View Connected Feds.
-    FLAGS: -id to list Fed Chat IDs.
-    USAGE: .listf | .listf -id
-    """
-    output: str = ""
-    total = 0
-    async for fed in FED_DB.find():
-        output += f'<b>• {fed["name"]}</b>\n'
-        if "-id" in message.flags:
-            output += f'  <code>{fed["_id"]}</code>\n'
-        total += 1
-    if not total:
-        await message.reply("You don't have any Feds Connected.")
-        return
-    output: str = f"List of <b>{total}</b> Connected Feds:\n\n{output}"
-    await message.reply(output, del_in=30, block=True)
-
-@bot.add_cmd(cmd="unfban")
-async def un_fban(bot: BOT, message: Message):
-    progress: Message = await message.reply("❯")
-    extracted_info = await get_user_reason(message=message, progress=progress)
-
-    if not extracted_info:
-        return
-
-    user_id, user_mention, reason = extracted_info
-    unfban_cmd: str = f"/unfban <a href='tg://user?id={user_id}'>{user_id}</a> {reason}"
-
-    await perform_fed_task(
-        user_id=user_id,
-        user_mention=user_mention,
-        command=unfban_cmd,
-        task_filter=UNFBAN_REGEX,
-        task_type="Un-FBan",
-        reason=reason,
-        progress=progress,
-        message=message,
-    )
-
 async def get_user_reason(
     message: Message, progress: Message
 ) -> tuple[int, str, str] | None:
@@ -226,10 +181,10 @@ async def perform_fed_task(
     async for fed in FED_DB.find():
         chat_id = int(fed["_id"])
         total += 1
-        cmd: Message = await bot.send_message(
-            chat_id=chat_id, text=command, disable_web_page_preview=True
-        )
         try:
+            cmd: Message = await bot.send_message(
+                chat_id=chat_id, text=command, disable_web_page_preview=True
+            )
             response: Message | None = await cmd.get_response(
                 filters=task_filter, timeout=8
             )
@@ -239,6 +194,8 @@ async def perform_fed_task(
                 await response.click("Update reason")
         except asyncio.TimeoutError:
             failed.append(fed["name"])
+        except Exception as e:
+            failed.append(f"{fed['name']} ({str(e)})")
         await asyncio.sleep(1)
     if not total:
         await progress.edit("You Don't have any feds connected!")
@@ -274,3 +231,4 @@ async def handle_sudo_fban(command: str):
     await bot.send_message(
         chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, disable_web_page_preview=True
     )
+
