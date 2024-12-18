@@ -1,14 +1,15 @@
 import asyncio
-from typing import Optional
+from typing import Optional, Set
 
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus, ChatType
-from pyrogram.types import Chat, User, Message as PyroMessage
+from pyrogram.types import Chat, User, Message as PyroMessage, MessageOriginUser, MessageOriginChannel
 from ub_core.utils.helpers import get_name
 
 from app import BOT, Config, CustomDB, Message, bot, extra_config
 
 FED_DB = CustomDB("FED_LIST")
+FBAN_APPROVERS = CustomDB("FBAN_APPROVERS")
 
 BASIC_FILTER = filters.user([609517172, 2059887769]) & ~filters.service
 
@@ -30,38 +31,46 @@ async def wait_for_response(bot: BOT, chat_id: int, user_id: int, timeout: int =
     while asyncio.get_event_loop().time() - start_time < timeout:
         try:
             async for message in bot.get_chat_history(chat_id, limit=1):
-                if message.from_user.id == user_id and message.text and message.text.lower() in ['y', 'n']:
+                if message.from_user and message.from_user.id == user_id and message.text and message.text.lower() in ['y', 'n']:
                     return message.text.lower()
         except Exception as e:
             print(f"Error in wait_for_response: {e}")
         await asyncio.sleep(1)
     return None
 
+async def is_fban_approver(user_id: int) -> bool:
+    return await FBAN_APPROVERS.find_one({"_id": user_id}) is not None
+
 @bot.on_message(filters.chat(FBAN_GROUP_ID) & filters.forwarded)
 async def auto_fban(bot: BOT, message: Message):
-    if message.forward_origin:
-        user_id = message.forward_origin.sender_user.id if message.forward_origin.sender_user else None
-        user_mention = message.forward_origin.sender_user.mention if message.forward_origin.sender_user else "Unknown User"
-        
-        if not user_id:
-            await message.reply("Unable to determine the user to ban.")
-            return
-        
-        reason = f"Auto-FBan: Forwarded message in {message.chat.title}"
-        
-        # Ask for confirmation
-        confirmation = await message.reply(
-            f"Are you sure you want to FBan {user_mention}?\n"
-            f"Reason: {reason}\n\n"
-            f"Reply with 'y' to confirm or 'n' to cancel."
-        )
+    if not message.from_user:
+        return
 
-        response = await wait_for_response(bot, message.chat.id, message.from_user.id)
+    if isinstance(message.forward_origin, MessageOriginChannel):
+        return  # Ignore messages forwarded from channels
 
-        if response == 'y':
-            await perform_fban(bot, message, user_id, user_mention, reason)
-        else:
-            await message.reply("FBan cancelled.")
+    if isinstance(message.forward_origin, MessageOriginUser):
+        user_id = message.forward_origin.sender_user.id
+        user_mention = message.forward_origin.sender_user.mention
+    else:
+        await message.reply("Unable to determine the user to ban.")
+        return
+
+    reason = f"Auto-FBan: Forwarded message in {message.chat.title}"
+    
+    # Ask for confirmation
+    confirmation = await message.reply(
+        f"Are you sure you want to FBan {user_mention}?\n"
+        f"Reason: {reason}\n\n"
+        f"Reply with 'y' to confirm or 'n' to cancel."
+    )
+
+    response = await wait_for_response(bot, message.chat.id, message.from_user.id)
+
+    if response == 'y':
+        await perform_fban(bot, message, user_id, user_mention, reason)
+    else:
+        await message.reply("FBan cancelled.")
 
 @bot.add_cmd(cmd="ffbanp")
 async def manual_fban(bot: BOT, message: Message):
@@ -88,6 +97,35 @@ async def manual_fban(bot: BOT, message: Message):
         await perform_fban(bot, message, user_id, user_mention, reason, progress)
     else:
         await progress.edit("FBan cancelled.")
+
+@bot.add_cmd(cmd="fapprove")
+async def add_fban_approver(bot: BOT, message: Message):
+    if not message.from_user or message.from_user.id != Config.OWNER_ID:
+        return
+
+    user, _ = await message.extract_user_n_reason()
+    if not user:
+        await message.reply("Please specify a user to add as an FBan approver.")
+        return
+
+    await FBAN_APPROVERS.add_data({"_id": user.id, "name": user.first_name})
+    await message.reply(f"{user.mention} has been added as an FBan approver.")
+
+@bot.add_cmd(cmd="fremove")
+async def remove_fban_approver(bot: BOT, message: Message):
+    if not message.from_user or message.from_user.id != Config.OWNER_ID:
+        return
+
+    user, _ = await message.extract_user_n_reason()
+    if not user:
+        await message.reply("Please specify a user to remove from FBan approvers.")
+        return
+
+    result = await FBAN_APPROVERS.delete_data(id=user.id)
+    if result:
+        await message.reply(f"{user.mention} has been removed from FBan approvers.")
+    else:
+        await message.reply(f"{user.mention} is not an FBan approver.")
 
 async def perform_fban(bot: BOT, message: Message, user_id: int, user_mention: str, reason: str, progress: Message = None):
     if progress:
@@ -187,7 +225,7 @@ async def perform_fed_task(
         total += 1
         try:
             cmd: Message = await bot.send_message(
-                chat_id=chat_id, text=command, disable_web_page_preview=True
+                chat_id=chat_id, text=command, link_preview_options={"is_disabled": True}
             )
             response: Message | None = await cmd.get_response(
                 filters=task_filter, timeout=8
@@ -221,10 +259,10 @@ async def perform_fed_task(
     await bot.send_message(
         chat_id=extra_config.FBAN_LOG_CHANNEL,
         text=resp_str,
-        disable_web_page_preview=True,
+        link_preview_options={"is_disabled": True},
     )
     await progress.edit(
-        text=resp_str, del_in=5, block=True, disable_web_page_preview=True
+        text=resp_str, del_in=5, block=True, link_preview_options={"is_disabled": True}
     )
     await handle_sudo_fban(command=command)
 
@@ -233,6 +271,6 @@ async def handle_sudo_fban(command: str):
         return
     sudo_cmd = command.replace("/", extra_config.FBAN_SUDO_TRIGGER, 1)
     await bot.send_message(
-        chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, disable_web_page_preview=True
+        chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, link_preview_options={"is_disabled": True}
     )
 
