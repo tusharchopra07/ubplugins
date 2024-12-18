@@ -150,48 +150,6 @@ async def perform_fban(bot: BOT, message: Message, user_id: int, user_mention: s
         message=message,
     )
 
-@bot.add_cmd(cmd="addf")
-async def add_fed(bot: BOT, message: Message):
-    """
-    CMD: ADDF
-    INFO: Add a Fed Chat to DB.
-    USAGE:
-        .addf | .addf NAME
-    """
-    data = dict(name=message.input or message.chat.title, type=str(message.chat.type))
-    await FED_DB.add_data({"_id": message.chat.id, **data})
-    text = f"#FBANS\n<b>{data['name']}</b>: <code>{message.chat.id}</code> added to FED LIST."
-    await message.reply(text=text, del_in=5, block=True)
-    await bot.log_text(text=text, type="info")
-
-@bot.add_cmd(cmd="delf")
-async def remove_fed(bot: BOT, message: Message):
-    """
-    CMD: DELF
-    INFO: Delete a Fed from DB.
-    FLAGS: -all to delete all feds.
-    USAGE:
-        .delf | .delf id | .delf -all
-    """
-    if "-all" in message.flags:
-        await FED_DB.drop()
-        await message.reply("FED LIST cleared.")
-        return
-    chat: int | str | Chat = message.input or message.chat
-    name = ""
-    if isinstance(chat, Chat):
-        name = f"Chat: {chat.title}\n"
-        chat = chat.id
-    elif chat.lstrip("-").isdigit():
-        chat = int(chat)
-    deleted: int = await FED_DB.delete_data(id=chat)
-    if deleted:
-        text = f"#FBANS\n<b>{name}</b><code>{chat}</code> removed from FED LIST."
-        await message.reply(text=text, del_in=8)
-        await bot.log_text(text=text, type="info")
-    else:
-        await message.reply(text=f"<b>{name or chat}</b> not in FED LIST.", del_in=8)
-
 async def get_user_reason(
     message: Message, progress: Message
 ) -> tuple[int, str, str] | None:
