@@ -29,19 +29,24 @@ async def wait_for_response(bot: BOT, chat_id: int, user_id: int, timeout: int =
     start_time = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start_time < timeout:
         try:
-            message = await bot.get_messages(chat_id, filters=filters.user(user_id) & filters.regex(r"^[yn]$"), limit=1)
-            if message:
-                return message[0].text.lower()
-        except Exception:
-            pass
+            async for message in bot.get_chat_history(chat_id, limit=1):
+                if message.from_user.id == user_id and message.text and message.text.lower() in ['y', 'n']:
+                    return message.text.lower()
+        except Exception as e:
+            print(f"Error in wait_for_response: {e}")
         await asyncio.sleep(1)
     return None
 
 @bot.on_message(filters.chat(FBAN_GROUP_ID) & filters.forwarded)
 async def auto_fban(bot: BOT, message: Message):
-    if message.forward_from:
-        user_id = message.forward_from.id
-        user_mention = message.forward_from.mention
+    if message.forward_origin:
+        user_id = message.forward_origin.sender_user.id if message.forward_origin.sender_user else None
+        user_mention = message.forward_origin.sender_user.mention if message.forward_origin.sender_user else "Unknown User"
+        
+        if not user_id:
+            await message.reply("Unable to determine the user to ban.")
+            return
+        
         reason = f"Auto-FBan: Forwarded message in {message.chat.title}"
         
         # Ask for confirmation
@@ -230,3 +235,4 @@ async def handle_sudo_fban(command: str):
     await bot.send_message(
         chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, disable_web_page_preview=True
     )
+
