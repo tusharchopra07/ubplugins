@@ -44,7 +44,7 @@ async def auto_fban(bot: BOT, message: Message):
 
     user_id = message.forward_from.id
     user_mention = message.forward_from.mention
-    reason = f"Auto-FBan: Forwarded message in {message.chat.title}"
+    reason = f"Automated FedBan, Proof:"
     
     if not await is_fban_approver(message.from_user.id):
         await message.reply("You are not authorized to approve FBans.")
@@ -125,7 +125,7 @@ async def perform_fban(bot: BOT, message: Message, user_id: int, user_mention: s
         progress = await message.reply("Processing FBan...")
 
     proof = await message.forward(extra_config.FBAN_LOG_CHANNEL)
-    proof_str = f"\n{proof.link}"
+    proof_str = f"\n{ {proof.link} }"
     reason = f"{reason}{proof_str}"
 
     fban_cmd: str = f"/fban <a href='tg://user?id={user_id}'>{user_id}</a> {reason}"
