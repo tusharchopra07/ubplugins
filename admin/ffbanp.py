@@ -1,8 +1,9 @@
 import asyncio
+from typing import Optional
 
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus, ChatType
-from pyrogram.types import Chat, User
+from pyrogram.types import Chat, User, Message as PyroMessage
 from ub_core.utils.helpers import get_name
 
 from app import BOT, Config, CustomDB, Message, bot, extra_config
@@ -24,6 +25,18 @@ FBAN_REGEX = BASIC_FILTER & filters.regex(
 # Specify the group ID where forwarded messages will be sent for automatic banning
 FBAN_GROUP_ID = -1002299458034  # Replace with your actual group ID
 
+async def wait_for_response(bot: BOT, chat_id: int, user_id: int, timeout: int = 30) -> Optional[str]:
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < timeout:
+        try:
+            message = await bot.get_messages(chat_id, filters=filters.user(user_id) & filters.regex(r"^[yn]$"), limit=1)
+            if message:
+                return message[0].text.lower()
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    return None
+
 @bot.on_message(filters.chat(FBAN_GROUP_ID) & filters.forwarded)
 async def auto_fban(bot: BOT, message: Message):
     if message.forward_from:
@@ -38,19 +51,12 @@ async def auto_fban(bot: BOT, message: Message):
             f"Reply with 'y' to confirm or 'n' to cancel."
         )
 
-        try:
-            response = await bot.wait_for_message(
-                chat_id=message.chat.id,
-                filters=filters.regex(r"^[yn]$") & filters.user(message.from_user.id),
-                timeout=30
-            )
+        response = await wait_for_response(bot, message.chat.id, message.from_user.id)
 
-            if response.text.lower() == 'y':
-                await perform_fban(bot, message, user_id, user_mention, reason)
-            else:
-                await message.reply("FBan cancelled.")
-        except asyncio.TimeoutError:
-            await message.reply("FBan cancelled due to timeout.")
+        if response == 'y':
+            await perform_fban(bot, message, user_id, user_mention, reason)
+        else:
+            await message.reply("FBan cancelled.")
 
 @bot.add_cmd(cmd="ffbanp")
 async def manual_fban(bot: BOT, message: Message):
@@ -71,19 +77,12 @@ async def manual_fban(bot: BOT, message: Message):
         f"Reply with 'y' to confirm or 'n' to cancel."
     )
 
-    try:
-        response = await bot.wait_for_message(
-            chat_id=message.chat.id,
-            filters=filters.regex(r"^[yn]$") & filters.user(message.from_user.id),
-            timeout=30
-        )
+    response = await wait_for_response(bot, message.chat.id, message.from_user.id)
 
-        if response.text.lower() == 'y':
-            await perform_fban(bot, message, user_id, user_mention, reason, progress)
-        else:
-            await progress.edit("FBan cancelled.")
-    except asyncio.TimeoutError:
-        await progress.edit("FBan cancelled due to timeout.")
+    if response == 'y':
+        await perform_fban(bot, message, user_id, user_mention, reason, progress)
+    else:
+        await progress.edit("FBan cancelled.")
 
 async def perform_fban(bot: BOT, message: Message, user_id: int, user_mention: str, reason: str, progress: Message = None):
     if progress:
@@ -231,4 +230,3 @@ async def handle_sudo_fban(command: str):
     await bot.send_message(
         chat_id=extra_config.FBAN_SUDO_ID, text=sudo_cmd, disable_web_page_preview=True
     )
-
